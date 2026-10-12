@@ -281,13 +281,13 @@ static void create_playing_screen(lv_obj_t *scr)
     lv_obj_remove_flag(overlay, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(overlay, LV_OBJ_FLAG_HIDDEN);
 
-    /* Scroll template: 5s dwell at each end so the back-and-forth reads as
+    /* Scroll template: 2.5s dwell at each end so the back-and-forth reads as
        deliberate rather than glitchy. LVGL's default 300ms reverse/repeat
        delay reverses fast enough that long titles look like they're juddering. */
     static lv_anim_t scroll_anim_template;
     lv_anim_init(&scroll_anim_template);
-    lv_anim_set_repeat_delay(&scroll_anim_template, 5000);
-    lv_anim_set_reverse_delay(&scroll_anim_template, 5000);
+    lv_anim_set_repeat_delay(&scroll_anim_template, 2500);
+    lv_anim_set_reverse_delay(&scroll_anim_template, 2500);
 
     /* Title */
     title_label = lv_label_create(overlay);
@@ -362,6 +362,16 @@ static void create_playing_screen(lv_obj_t *scr)
     lv_obj_add_flag(idle_label, LV_OBJ_FLAG_HIDDEN);
 }
 
+/* State frames arrive every second. lv_label_set_text rebuilds a scrolling
+   label's animation even when the text is identical, which cuts the dwell at
+   each end short and makes the scroll stutter. Only touch it on a real change. */
+static void set_text_if_changed(lv_obj_t *label, const char *text)
+{
+    if (strcmp(lv_label_get_text(label), text) != 0) {
+        lv_label_set_text(label, text);
+    }
+}
+
 /* ── Public API ───────────────────────────────────────────────── */
 
 void ui_init(void)
@@ -425,8 +435,8 @@ void ui_update_from_state(const np_state_t *state, const uint8_t *art_pixels,
        has caught up. */
     bool optimistic_hold = (int32_t)(s_optimistic_until_ms - now_ms) > 0;
 
-    lv_label_set_text(title_label, state->title);
-    lv_label_set_text(artist_label, state->artist);
+    set_text_if_changed(title_label, state->title);
+    set_text_if_changed(artist_label, state->artist);
     if (!optimistic_hold) {
         lv_label_set_text(toggle_label,
             state->playback_rate > 0 ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);

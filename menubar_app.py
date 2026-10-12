@@ -40,6 +40,12 @@ PYTHON = "/usr/bin/python3"
 # screen. Keeps a forgotten paused track from sitting on screen indefinitely.
 RECENT_PLAY_TIMEOUT_S = 5 * 60
 
+# Cap on how long a single write may block. Without it a device that stops
+# draining USB (mid-reboot, wedged) hangs the write forever while holding
+# port_lock, freezing both the heartbeat and the main-thread tick. A full
+# 412x412 artwork frame takes well under a second at USB full speed.
+WRITE_TIMEOUT_S = 5
+
 # How many ticks (1s apart) to keep re-fetching a new track's artwork before
 # giving up on it. Covers the window where MediaRemote has published the new
 # track's metadata but not yet its artwork.
@@ -327,7 +333,9 @@ def find_device():
     """Return (path, art_size) for the first device that answers, else None."""
     for path in glob.glob("/dev/cu.usbmodem*"):
         try:
-            port = serial.Serial(path, 115200, timeout=0.5)
+            port = serial.Serial(
+                path, 115200, timeout=0.5, write_timeout=WRITE_TIMEOUT_S
+            )
             port.reset_input_buffer()
             port.write(b"\x00")
             time.sleep(0.2)
@@ -343,7 +351,7 @@ def find_device():
 
 def read_commands(port):
     buf = b""
-    while True:
+    while port.is_open:
         try:
             chunk = port.read(port.in_waiting or 1)
         except Exception:
@@ -478,16 +486,36 @@ class NowPlayingBridge(rumps.App):
                 # costing an adapter subprocess every second.
                 if self._art_attempts < ART_FETCH_ATTEMPTS:
                     self._art_attempts += 1
-                    jpeg = get_artwork_bytes()
-                    if jpeg:
-                        rgb565 = jpeg_to_rgb565(jpeg, self.art_size)
+                    rgb565 = self._artwork_frame()
+                    if rgb565:
                         send_artwork(self.port, rgb565, self.port_lock)
                         self.last_art_id = art_id
         except Exception:
-            self.port = None
-            self.port_path = None
-            self.last_art_id = ""
-            self._art_attempt_id = ""
+            self._disconnect()
+
+    def _artwork_frame(self) -> bytes | None:
+        # Kept apart from the serial writes: artwork that fails to fetch or
+        # decode is a problem with that track, not with the device, and must
+        # not tear down a working connection.
+        try:
+            jpeg = get_artwork_bytes()
+            return jpeg_to_rgb565(jpeg, self.art_size) if jpeg else None
+        except Exception:
+            return None
+
+    def _disconnect(self):
+        # Close the port, not just forget it. A port left open keeps its
+        # reader thread alive, and that thread swallows the NP:ACK reply to
+        # find_device's next ping on the same path, so the app never
+        # reconnects until it is restarted.
+        port, self.port, self.port_path = self.port, None, None
+        self.last_art_id = ""
+        self._art_attempt_id = ""
+        if port is not None:
+            try:
+                port.close()
+            except Exception:
+                pass
 
     def _connect(self):
         found = find_device()
@@ -495,7 +523,9 @@ class NowPlayingBridge(rumps.App):
             return
         path, art_size = found
         try:
-            self.port = serial.Serial(path, 115200, timeout=0.1)
+            self.port = serial.Serial(
+                path, 115200, timeout=0.1, write_timeout=WRITE_TIMEOUT_S
+            )
             self.port_path = path
             self.art_size = art_size
             self.reader_thread = threading.Thread(
