@@ -106,7 +106,9 @@ void display_init(void)
     const lvgl_port_display_cfg_t disp_cfg = {
         .io_handle = io,
         .panel_handle = panel,
-        .buffer_size = LCD_H_RES * 60 * sizeof(uint16_t),
+        /* Small draw buffers: with no PSRAM, internal RAM has to leave room
+           for the 115 kB artwork frame (see serial.c). */
+        .buffer_size = LCD_H_RES * 20 * sizeof(uint16_t),
         .double_buffer = true,
         .hres = LCD_H_RES,
         .vres = LCD_V_RES,
