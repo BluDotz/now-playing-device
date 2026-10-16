@@ -93,8 +93,6 @@ void display_init(void)
     ESP_ERROR_CHECK(esp_lcd_panel_reset(panel));
     ESP_ERROR_CHECK(esp_lcd_panel_init(panel));
     ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel, true));
-    /* Found on hardware: the picture comes up mirrored left-to-right. */
-    ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel, true, false));
     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel, true));
 
     ESP_LOGI(TAG, "GC9A01 initialized");
@@ -116,6 +114,10 @@ void display_init(void)
         .vres = LCD_V_RES,
         .flags = {
             .swap_bytes = 1,
+            /* Found on hardware: the picture comes up mirrored left-to-right.
+               Set here, not via esp_lcd_panel_mirror(), because the LVGL port
+               re-applies its own mirror flags when the display is added. */
+            .mirror_x = 1,
         },
     };
     lvgl_port_add_disp(&disp_cfg);
