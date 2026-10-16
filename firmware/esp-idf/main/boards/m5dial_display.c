@@ -114,10 +114,12 @@ void display_init(void)
         .vres = LCD_V_RES,
         .flags = {
             .swap_bytes = 1,
-            /* Found on hardware: the picture comes up mirrored left-to-right.
-               Set here, not via esp_lcd_panel_mirror(), because the LVGL port
-               re-applies its own mirror flags when the display is added. */
-            .mirror_x = 1,
+        },
+        /* Found on hardware: the picture comes up mirrored left-to-right.
+           Set here, not via esp_lcd_panel_mirror(), because the LVGL port
+           re-applies its own mirror flags when the display is added. */
+        .rotation = {
+            .mirror_x = true,
         },
     };
     lvgl_port_add_disp(&disp_cfg);
