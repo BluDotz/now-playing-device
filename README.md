@@ -39,6 +39,20 @@ Three things about this board are worth knowing before changing its drivers, all
 - **Touch does not flip with the display.** Presses land on the right widgets exactly as the controller reports them; inverting them to match the rotated display puts every press 180° out. Hence two separate switches in `main/boards/ws_s3_bus.h`: `BOARD_FLIP_180` for the picture and `BOARD_TOUCH_FLIP_180` for presses. Setting `BOARD_FLIP_180` to `0` runs the screen Waveshare's way up, with the cable at the bottom — check whether touch then needs its own switch set to `1`, as only the shipped combination has been tried on hardware.
 - **The touch controller is driven in-tree** (`boards/ws_s3_touch.c`) rather than through Espressif's `esp_lcd_touch_spd2010`. That component reads via `esp_lcd_panel_io_i2c` with a zero-length command phase, which on ESP-IDF 5.5 becomes a zero-length `i2c_master` write before every read and is rejected with `ESP_ERR_INVALID_ARG`. The register sequence is ported from it.
 
+**M5Stack Dial** (ESP32-S3 StampS3, 8MB flash, no PSRAM)
+
+- [M5Stack Dial](https://docs.m5stack.com/en/core/M5Dial) — GC9A01 240x240 round LCD over SPI, FT3267 touch over I2C, rotary encoder with push button
+- Shares the `esp32s3` target with the Waveshare board, so it is selected by `sdkconfig.defaults.m5dial` (`CONFIG_NP_BOARD_M5DIAL`) rather than by target alone
+- Controls: tap the on-screen buttons, **turn the dial** for next / previous track, **press it** for play / pause
+- Build and flash:
+
+```bash
+cd firmware/esp-idf
+idf.py -B build-m5dial -DSDKCONFIG=sdkconfig.m5dial \
+  -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.m5dial" set-target esp32s3
+idf.py -B build-m5dial -DSDKCONFIG=sdkconfig.m5dial build flash
+```
+
 ## Building the menu bar app
 
 Produces a self-contained `NowPlayingDisplay.app` with the vendored `MediaRemoteAdapter.framework` — driven via `/usr/bin/python3` and `ctypes`. No Homebrew or external CLI required at runtime.
