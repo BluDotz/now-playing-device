@@ -15,11 +15,11 @@ A macOS "now playing" display for a small round ESP32 screen. Shows album art, t
 └───────────┘  touch cmds    └────────────────┘  media controls    └──────────────────┘
 ```
 
-The Mac reads now-playing metadata via the bundled [`MediaRemoteAdapter.framework`](https://github.com/ungive/mediaremote-adapter), loaded in-process by `/usr/bin/python3` (a `com.apple.*`-signed binary — macOS 15.4+ only authorizes the private MediaRemote framework for callers with an Apple bundle id, so the bundled py2app Python can't reach it directly). Artwork is converted to RGB565 and pushed to the ESP32 over USB serial; touch input on the display sends prev/toggle/next commands back. The device declares its own panel size in the USB handshake, so one build of the Mac app drives either board.
+The Mac reads now-playing metadata via the bundled [`MediaRemoteAdapter.framework`](https://github.com/ungive/mediaremote-adapter), loaded in-process by `/usr/bin/python3` (a `com.apple.*`-signed binary — macOS 15.4+ only authorizes the private MediaRemote framework for callers with an Apple bundle id, so the bundled py2app Python can't reach it directly). Artwork is converted to RGB565 and pushed to the ESP32 over USB serial; touch input on the display sends prev/toggle/next commands back. The device declares its own panel size in the USB handshake, so one build of the Mac app drives any of the supported boards.
 
 ## Hardware
 
-Two boards are supported. The firmware picks the right one from the build target; the UI is authored against the 240px panel and scaled from there (see `main/board.h`).
+Three boards are supported. The firmware picks the right one from the build target (the M5Stack Dial shares the ESP32-S3 target with the Waveshare board and is chosen by a config overlay instead); the UI is authored against the 240px panel and scaled from there (see `main/board.h`).
 
 **Seeed XIAO ESP32-C6** (`idf.py set-target esp32c6`)
 
@@ -39,12 +39,29 @@ Three things about this board are worth knowing before changing its drivers, all
 - **Touch does not flip with the display.** Presses land on the right widgets exactly as the controller reports them; inverting them to match the rotated display puts every press 180° out. Hence two separate switches in `main/boards/ws_s3_bus.h`: `BOARD_FLIP_180` for the picture and `BOARD_TOUCH_FLIP_180` for presses. Setting `BOARD_FLIP_180` to `0` runs the screen Waveshare's way up, with the cable at the bottom — check whether touch then needs its own switch set to `1`, as only the shipped combination has been tried on hardware.
 - **The touch controller is driven in-tree** (`boards/ws_s3_touch.c`) rather than through Espressif's `esp_lcd_touch_spd2010`. That component reads via `esp_lcd_panel_io_i2c` with a zero-length command phase, which on ESP-IDF 5.5 becomes a zero-length `i2c_master` write before every read and is rejected with `ESP_ERR_INVALID_ARG`. The register sequence is ported from it.
 
-**M5Stack Dial** (ESP32-S3 StampS3, 8MB flash, no PSRAM)
+**M5Stack Dial** (ESP32-S3 StampS3 — ESP32-S3FN8, 8MB flash, no PSRAM)
 
-- [M5Stack Dial](https://docs.m5stack.com/en/core/M5Dial) — GC9A01 240x240 round LCD over SPI, FT3267 touch over I2C, rotary encoder with push button
+- [M5Stack Dial](https://docs.m5stack.com/en/core/M5Dial) — GC9A01 240x240 round LCD over SPI, FT3267 capacitive touch over I2C, and a rotary encoder with a push button (the whole bezel dial clicks)
 - Shares the `esp32s3` target with the Waveshare board, so it is selected by `sdkconfig.defaults.m5dial` (`CONFIG_NP_BOARD_M5DIAL`) rather than by target alone
-- Controls: tap the on-screen buttons, **turn the dial** for next / previous track, **press it** for play / pause
-- Build and flash:
+- Artwork is pushed at 240x240 (~115 kB a frame), held in internal RAM
+
+Controls:
+
+| Control | Action |
+|---------|--------|
+| Turn the dial | Skip to the next / previous track (one step per click) |
+| Press the dial in | Play / pause |
+| Tap the on-screen buttons | Previous / play-pause / next, as on the other boards |
+
+If the screen has dimmed, the first touch or press only wakes it; turning the dial wakes it and also skips.
+
+Three things about this board are worth knowing before changing its config, all found on hardware:
+
+- **The Waveshare PSRAM settings leak in.** ESP-IDF layers `sdkconfig.defaults.esp32s3` underneath any `sdkconfig.defaults`, which turns on octal PSRAM. The Dial has none, so it aborts at boot with `PSRAM chip is not connected`. `sdkconfig.defaults.m5dial` switches it off explicitly.
+- **The artwork frame only just fits in RAM.** With no PSRAM, 115 kB of contiguous internal heap has to be left over after LVGL. The Dial build therefore uses 20-line draw buffers (`boards/m5dial_display.c`) and a 48 kB LVGL pool instead of the defaults. Growing either can make `serial_init` fail its artwork allocation at boot.
+- **The picture comes up mirrored left-to-right.** The flip is set through `esp_lvgl_port`'s `rotation.mirror_x` flag; a plain `esp_lcd_panel_mirror()` call had no visible effect (the LVGL port applies its own mirror flags when it registers the display).
+
+Build and flash (use `-p /dev/cu.usbmodem*` with `flash`; if flashing drops out part-way, quit the Mac app first since it also opens that port, and try `-b 115200`):
 
 ```bash
 cd firmware/esp-idf
@@ -117,6 +134,8 @@ Each [release](https://github.com/gxlabs/now-playing-device/releases) ships one 
 | Waveshare ESP32-S3-Touch-LCD-1.46 | `firmware-esp32s3.bin` | `esptool.py --chip esp32s3 -p /dev/cu.usbmodem* write_flash 0x0 firmware-esp32s3.bin` |
 | Seeed XIAO ESP32-C6 + Round Display | `firmware-esp32c6.bin` | `esptool.py --chip esp32c6 -p /dev/cu.usbmodem* write_flash 0x0 firmware-esp32c6.bin` |
 
+There is no prebuilt image for the M5Stack Dial yet; build it from source (below).
+
 The images are board-specific — the S3 one assumes 16MB flash and octal PSRAM, the C6 one 4MB and none — so flashing the wrong one at best fails to boot. If `esptool` can't enter download mode by itself, hold `BOOT` while plugging in.
 
 Releases before v1.2 shipped a single `firmware.bin`, which was the C6 image.
@@ -131,6 +150,11 @@ cd firmware/esp-idf
 # Waveshare ESP32-S3-Touch-LCD-1.46
 idf.py set-target esp32s3
 idf.py build flash
+
+# ...or M5Stack Dial (separate build dir + config; see the Hardware section)
+idf.py -B build-m5dial -DSDKCONFIG=sdkconfig.m5dial \
+  -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.m5dial" set-target esp32s3
+idf.py -B build-m5dial -DSDKCONFIG=sdkconfig.m5dial build flash
 
 # ...or Seeed XIAO ESP32-C6 + Round Display
 idf.py set-target esp32c6
