@@ -49,7 +49,8 @@ Controls:
 
 | Control | Action |
 |---------|--------|
-| Turn the dial | Skip to the next / previous track (one step per click) |
+| Turn the dial clockwise | Next track (one step per click) |
+| Turn the dial anticlockwise | Previous track |
 | Press the dial in | Play / pause |
 | Tap the on-screen buttons | Previous / play-pause / next, as on the other boards |
 
